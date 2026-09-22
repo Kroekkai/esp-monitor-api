@@ -1,0 +1,30 @@
+services:
+  esp-monitor-api:
+    build: .
+    container_name: esp-monitor-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-3005}:8000"
+    environment:
+      # Points at the EXISTING InfluxDB at innovation.ntplc.co.th - no
+      # InfluxDB container of our own anymore.
+      - TZ=Asia/Bangkok
+      - INFLUX_URL=${INFLUX_URL}
+      - INFLUX_TOKEN=${INFLUX_TOKEN}
+      - INFLUX_ORG=${INFLUX_ORG}
+      - INFLUX_BUCKET=${INFLUX_BUCKET}
+      - JWT_SECRET=${JWT_SECRET}
+      - DEVICE_API_KEY=${DEVICE_API_KEY}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - APP_PUBLIC_URL=${APP_PUBLIC_URL}
+      - DEVICE_VIEW_LINK_HOURS=${DEVICE_VIEW_LINK_HOURS}
+      - SQLITE_PATH=/data/app.db
+    volumes:
+      - ./data:/data
+    networks:
+      - innovation_net
+
+networks:
+  innovation_net:
+    external: true

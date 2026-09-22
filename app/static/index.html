@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ESP Temperature/Humidity Monitor</title>
+<script src="/iot/static/vendor/chart.umd.js"></script>
+<script src="/iot/static/vendor/chartjs-adapter-date-fns.bundle.min.js"></script>
+<link rel="stylesheet" href="/iot/static/style.css?v=31" />
+</head>
+<body>
+
+<header>
+  <h1>ESP Temp / Humidity Monitor</h1>
+  <div id="userBox" class="hidden">
+    <span id="whoami"></span>
+    <button id="logoutBtn">ออกจากระบบ</button>
+  </div>
+</header>
+
+<main>
+
+  <div id="globalError" class="global-error hidden"></div>
+
+  <!-- LOGIN -->
+  <section id="loginSection" class="card">
+    <h2>เข้าสู่ระบบ</h2>
+    <form id="loginForm">
+      <label>Username <input type="text" id="loginUsername" required autocomplete="username" /></label>
+      <label>Password <input type="password" id="loginPassword" required autocomplete="current-password" /></label>
+      <button type="submit">Login</button>
+      <p id="loginError" class="error"></p>
+    </form>
+  </section>
+
+  <!-- DASHBOARD -->
+  <section id="dashboardSection" class="hidden">
+
+    <div class="card controls">
+      <label>อุปกรณ์
+        <select id="deviceSelect"></select>
+      </label>
+      <label>หรือเลือกวันที่
+        <input type="date" id="dateFilter" />
+      </label>
+      <button type="button" id="clearDateBtn" class="secondary hidden">ล้างวันที่</button>
+      <label>อัปเดตอัตโนมัติ
+        <select id="autoRefreshInterval">
+          <option value="0">ปิด</option>
+          <option value="10000">ทุก 10 วิ</option>
+          <option value="30000" selected>ทุก 30 วิ</option>
+          <option value="60000">ทุก 1 นาที</option>
+        </select>
+      </label>
+      <button id="refreshBtn">รีเฟรช</button>
+      <div class="line-toggles">
+        <label class="checkbox-row inline-checkbox">
+          <input type="checkbox" id="showThresholdLine" checked />
+          เส้นทึบ (เกณฑ์แจ้งเตือน)
+        </label>
+        <label class="checkbox-row inline-checkbox">
+          <input type="checkbox" id="showClearLine" checked />
+          เส้นประ (กลับปกติ)
+        </label>
+      </div>
+      <span id="lastUpdated" class="muted"></span>
+    </div>
+    <p id="noDeviceMsg" class="muted hidden">ยังไม่มีอุปกรณ์ผูกกับบัญชีนี้ - แจ้งแอดมินให้เพิ่มอุปกรณ์ให้</p>
+
+    <div class="card">
+      <div class="chart-header">
+        <h2>อุณหภูมิ (°C)</h2>
+        <span id="tempLatest" class="latest-value latest-temp"></span>
+      </div>
+      <div class="chart-container"><canvas id="tempChart"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="chart-header">
+        <h2>ความชื้น (%)</h2>
+        <span id="humidLatest" class="latest-value latest-humid"></span>
+      </div>
+      <div class="chart-container"><canvas id="humidChart"></canvas></div>
+    </div>
+
+    <div class="card" id="dataTableCard">
+      <h2>ข้อมูลล่าสุด</h2>
+      <div class="table-wrap">
+        <table id="dataTable">
+          <thead>
+            <tr><th>เวลา</th><th>Device</th><th>อุณหภูมิ</th><th>ความชื้น</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ALERT SETTINGS - visible to everyone, but scoped to the currently
+         selected device (their own device for a regular user) -->
+    <div class="card">
+      <h2>ตั้งค่าแจ้งเตือน Telegram (อุปกรณ์ที่เลือกด้านบน)</h2>
+      <p id="alertPickDeviceMsg" class="muted hidden">เลือกอุปกรณ์เฉพาะเครื่องด้านบนก่อน เพื่อตั้งค่าแจ้งเตือน</p>
+      <form id="alertForm" class="alert-form hidden">
+        <label>Telegram Chat ID
+          <input type="text" id="alertChatId" placeholder="เช่น 123456789 หรือหลายคน: 123456789,987654321" />
+        </label>
+        <p class="muted">ใส่ได้หลาย Chat ID คั่นด้วยจุลภาค ถ้าอยากแจ้งเตือนหลายคนพร้อมกัน</p>
+
+        <div class="threshold-row">
+          <label>อุณหภูมิสูงกว่า (°C)
+            <input type="number" step="0.1" id="alertTempHigh" placeholder="ไม่ตั้ง" />
+          </label>
+          <label>อุณหภูมิกลับปกติเมื่อต่ำกว่า (°C)
+            <input type="number" step="0.1" id="alertTempHighClear" placeholder="ค่าเดียวกับด้านซ้าย" />
+          </label>
+        </div>
+
+        <div class="threshold-row">
+          <label>ความชื้นสูงกว่า (%)
+            <input type="number" step="0.1" id="alertHumidHigh" placeholder="ไม่ตั้ง" />
+          </label>
+          <label>ความชื้นกลับปกติเมื่อต่ำกว่า (%)
+            <input type="number" step="0.1" id="alertHumidHighClear" placeholder="ค่าเดียวกับด้านซ้าย" />
+          </label>
+        </div>
+
+        <p class="muted">ช่อง "กลับปกติเมื่อ..." เว้นว่างได้ - ถ้าไม่ตั้งจะใช้ค่าเดียวกับเกณฑ์แจ้งเตือน (ไม่กันการแจ้งซ้ำตอนค่าแกว่งใกล้เส้น) ตั้งให้ห่างจากเกณฑ์แจ้งเตือนสักหน่อยเพื่อกันแจ้งถี่เกินไป</p>
+
+        <label>เว้นระยะแจ้งเตือนซ้ำ (นาที)
+          <input type="number" id="alertCooldown" min="1" value="15" />
+        </label>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="alertEnabled" checked />
+          เปิดใช้งานการแจ้งเตือน
+        </label>
+
+        <div class="inline-form">
+          <button type="submit">บันทึกการตั้งค่า</button>
+          <button type="button" id="testAlertBtn">ส่งข้อความทดสอบ</button>
+        </div>
+        <p id="alertMsg" class="muted"></p>
+      </form>
+    </div>
+
+    <!-- DEVICE MANAGEMENT (ADMIN ONLY) -->
+    <div id="deviceAdminSection" class="card hidden">
+      <h2>จัดการอุปกรณ์ (admin)</h2>
+      <form id="deviceForm" class="inline-form">
+        <input type="text" id="devDeviceId" placeholder="device_id เช่น esp32-01" required />
+        <input type="text" id="devName" placeholder="ชื่อเล่น (ไม่บังคับ)" />
+        <select id="devOwner">
+          <option value="">— ไม่ผูกกับ user —</option>
+        </select>
+        <button type="submit">บันทึกอุปกรณ์</button>
+      </form>
+      <p id="deviceMsg" class="muted"></p>
+      <div class="table-wrap">
+        <table id="deviceTable">
+          <thead>
+            <tr><th>device_id</th><th>ชื่อ</th><th>เจ้าของ</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- USER MANAGEMENT (ADMIN ONLY) -->
+    <div id="adminSection" class="card hidden">
+      <h2>จัดการผู้ใช้ (admin)</h2>
+      <form id="createUserForm" class="inline-form">
+        <input type="text" id="newUsername" placeholder="username" required />
+        <input type="password" id="newPassword" placeholder="password" required />
+        <select id="newRole">
+          <option value="user">user</option>
+          <option value="admin">admin</option>
+        </select>
+        <button type="submit">เพิ่มผู้ใช้</button>
+      </form>
+      <p id="userMsg" class="muted"></p>
+      <button id="exportCsvBtn">ดาวน์โหลด users.csv</button>
+    </div>
+
+  </section>
+
+</main>
+
+<script src="/iot/static/app.js?v=31"></script>
+</body>
+</html>

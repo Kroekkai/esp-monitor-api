@@ -1,0 +1,235 @@
+:root {
+  --bg: #0f172a;
+  --card: #1e293b;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --error: #f87171;
+  --border: #334155;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 { font-size: 1.2rem; margin: 0; }
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+
+.card h2 { margin-top: 0; font-size: 1rem; color: var(--accent); }
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.chart-header h2 { margin: 0; }
+
+.latest-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.latest-temp { color: #f97316; }
+.latest-humid { color: #38bdf8; }
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+input, select {
+  background: #0b1220;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  /* iOS Safari zooms in on focus if font-size < 16px - keep inputs at 16px
+     on touch so tapping a field doesn't jolt the whole page. */
+  min-height: 40px;
+}
+
+/* Native date-input calendar icon renders dark/near-black by default and
+   is nearly invisible on our dark background - invert it so it's visible
+   and clearly tappable. */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+  cursor: pointer;
+}
+
+button {
+  background: var(--accent);
+  border: none;
+  color: #0b1220;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  min-height: 40px;
+  font-size: 0.95rem;
+}
+
+button:hover { opacity: 0.9; }
+
+button.secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.controls {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.controls label { flex: 1 1 140px; min-width: 120px; }
+.controls > button { flex: 0 0 auto; }
+.controls > .muted { flex: 1 1 100%; }
+
+.inline-form {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.error { color: var(--error); font-size: 0.85rem; }
+.muted { color: var(--muted); font-size: 0.85rem; }
+
+.hidden { display: none !important; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; }
+
+.table-wrap { max-height: 320px; overflow-y: auto; overflow-x: auto; }
+
+#userBox { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+.alert-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 480px;
+}
+
+.threshold-row {
+  display: flex;
+  gap: 14px;
+}
+
+.threshold-row label { flex: 1; min-width: 0; }
+
+.checkbox-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.checkbox-row input { width: auto; min-height: auto; }
+
+.inline-checkbox { flex: 0 1 auto !important; min-width: 0 !important; white-space: nowrap; }
+
+.line-toggles {
+  display: flex;
+  gap: 16px;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+}
+
+.chart-container { position: relative; width: 100%; height: 260px; }
+
+.global-error {
+  background: #3a1414;
+  border: 1px solid var(--error);
+  color: #fecaca;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  word-break: break-word;
+  white-space: pre-line;
+}
+
+/* --- mobile --- */
+@media (max-width: 640px) {
+  header { padding: 12px 16px; }
+  header h1 { font-size: 1.05rem; }
+
+  main { padding: 16px 12px 48px; gap: 16px; }
+
+  .card { padding: 14px 14px; border-radius: 8px; }
+  .card h2 { font-size: 0.95rem; }
+
+  /* Stack every control full-width - easier to tap, no cramped rows */
+  .controls,
+  .inline-form,
+  .threshold-row,
+  #createUserForm,
+  #deviceForm {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .line-toggles { flex-wrap: wrap; }
+
+  .controls label,
+  .threshold-row label {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .controls > button,
+  .inline-form > button,
+  #createUserForm > button,
+  #deviceForm > button {
+    width: 100%;
+  }
+
+  input, select, button { font-size: 1rem; }
+
+  .chart-container { height: 200px; }
+
+  table { font-size: 0.82rem; }
+  th, td { padding: 5px 8px; }
+}
