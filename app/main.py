@@ -21,12 +21,13 @@ from .auth import (
     require_admin,
 )
 from .database import Device, ShortLink, User, get_db, init_db
-from .influx import query_recent, write_sensor_point
+from .influx import query_latest, query_recent, write_sensor_point
 from .schemas import (
     AlertSettingsIn,
     AlertSettingsOut,
     DeviceIn,
     LoginRequest,
+    RegisterRequest,
     SensorData,
     Token,
     UserCreate,
@@ -161,6 +162,29 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     return Token(access_token=token)
 
 
+@iot.post("/api/register", response_model=Token)
+def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    """Self-service signup - open to anyone, no login required to call this.
+    Always creates a plain "user" account (RegisterRequest has no role
+    field at all - see schemas.py) with zero devices assigned; an admin
+    still has to assign a device before the new account sees any data.
+    Logs the new user straight in (same as a successful /api/login) so
+    they land on the dashboard immediately instead of registering then
+    having to log in separately."""
+    if db.query(User).filter(User.username == payload.username).first():
+        raise HTTPException(status_code=400, detail="Username already exists")
+    user = User(
+        username=payload.username,
+        hashed_password=hash_password(payload.password),
+        role="user",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = create_access_token({"sub": user.username, "role": user.role})
+    return Token(access_token=token)
+
+
 @iot.get("/api/sensor/data")
 def get_sensor_data(
     hours: int = 24,
@@ -199,6 +223,47 @@ def get_sensor_data(
             raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์เข้าถึงอุปกรณ์นี้")
         return query_recent(hours=hours, device_id=device_id, **date_range)
     return query_recent(hours=hours, device_ids=owned, **date_range)
+
+
+@iot.get("/api/sensor/latest")
+def get_sensor_latest(
+    device_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    """Simple export endpoint for external integrations: just the latest
+    reading per device, three fields only (device_id, temperature,
+    humidity) - no timestamp, no history. Same access rules as
+    /api/sensor/data (device-view token = that one device only, regular
+    user = only their own devices, admin = everything)."""
+    single_device = device_id  # remember if the caller pinned one device
+
+    if isinstance(principal, dict):
+        allowed_device = principal["device_view"]
+        if device_id and device_id != allowed_device:
+            raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์เข้าถึงอุปกรณ์นี้")
+        # A device-view token is always scoped to exactly one device, so the
+        # response is a single object even if ?device_id= wasn't passed.
+        single_device = allowed_device
+        rows = query_latest(device_id=allowed_device)
+    else:
+        user = principal
+        if user.role == "admin":
+            rows = query_latest(device_id=device_id) if device_id else query_latest()
+        else:
+            owned = _owned_device_ids(db, user)
+            if device_id:
+                if device_id not in owned:
+                    raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์เข้าถึงอุปกรณ์นี้")
+                rows = query_latest(device_id=device_id)
+            else:
+                rows = query_latest(device_ids=owned)
+
+    # A specific device was asked for (or implied by a device-view token) ->
+    # return a single flat object, not a one-item list.
+    if single_device:
+        return rows[0] if rows else {"device_id": single_device, "temperature": None, "humidity": None}
+    return rows
 
 
 # ---------------------------------------------------------------------------

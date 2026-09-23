@@ -6,7 +6,7 @@
 <title>ESP Temperature/Humidity Monitor</title>
 <script src="/iot/static/vendor/chart.umd.js"></script>
 <script src="/iot/static/vendor/chartjs-adapter-date-fns.bundle.min.js"></script>
-<link rel="stylesheet" href="/iot/static/style.css?v=31" />
+<link rel="stylesheet" href="/iot/static/style.css?v=32" />
 </head>
 <body>
 
@@ -31,6 +31,21 @@
       <button type="submit">Login</button>
       <p id="loginError" class="error"></p>
     </form>
+    <p class="muted auth-switch" id="showRegisterWrap">
+      ยังไม่มีบัญชี? <a href="#" id="showRegisterLink">สมัครสมาชิก</a>
+    </p>
+
+    <form id="registerForm" class="hidden">
+      <h2>สมัครสมาชิก</h2>
+      <label>Username <input type="text" id="registerUsername" required minlength="3" autocomplete="username" /></label>
+      <label>Password (อย่างน้อย 6 ตัวอักษร) <input type="password" id="registerPassword" required minlength="6" autocomplete="new-password" /></label>
+      <button type="submit">สมัครสมาชิก</button>
+      <p id="registerError" class="error"></p>
+      <p class="muted">สมัครแล้วจะยังไม่เห็นข้อมูลอุปกรณ์ใดๆ จนกว่า admin จะผูกอุปกรณ์ให้</p>
+    </form>
+    <p class="muted auth-switch hidden" id="showLoginWrap">
+      มีบัญชีอยู่แล้ว? <a href="#" id="showLoginLink">เข้าสู่ระบบ</a>
+    </p>
   </section>
 
   <!-- DASHBOARD -->
@@ -185,6 +200,6 @@
 
 </main>
 
-<script src="/iot/static/app.js?v=31"></script>
+<script src="/iot/static/app.js?v=32"></script>
 </body>
 </html>

@@ -280,6 +280,16 @@ GET /iot/api/sensor/data?device_id=esp32-01&start=2026-09-15T00:00:00Z&stop=2026
 (กดวันที่ 15 ก.ย. จากเมืองไทย → ระบบดึงข้อมูลตั้งแต่เที่ยงคืนถึงเที่ยงคืนตามเวลา
 ไทยจริงๆ ไม่ใช่เที่ยงคืน UTC)
 
+**ดึงแค่ค่าล่าสุด (สำหรับเชื่อมกับระบบภายนอก)** — คืนแค่ 3 ฟิลด์ ไม่มี timestamp:
+
+```
+GET /iot/api/sensor/latest?device_id=esp32-01
+Header: Authorization: Bearer <token>
+→ {"device_id": "esp32-01", "temperature": 26.5, "humidity": 70.0}
+```
+ไม่ใส่ `device_id` จะได้ array ของทุกอุปกรณ์ที่เข้าถึงได้แทน (สิทธิ์การเข้าถึงกฎ
+เดียวกับ endpoint ด้านบนทุกอย่าง — user ทั่วไปเห็นแค่อุปกรณ์ตัวเอง)
+
 ### 4) จัดการอุปกรณ์ (admin เท่านั้น — ทำผ่านหน้าเว็บก็ได้)
 
 ```
@@ -303,6 +313,19 @@ POST /iot/api/users
 Header: Authorization: Bearer <admin token>
 Body: {"username": "somchai", "password": "xxxx", "role": "user"}
 ```
+
+### 5.1) สมัครสมาชิกด้วยตัวเอง (ไม่ต้อง login — มีปุ่ม "สมัครสมาชิก" ในหน้าเว็บแล้ว)
+
+```
+POST /iot/api/register
+Body: {"username": "somchai", "password": "xxxxxx"}   # password อย่างน้อย 6 ตัวอักษร
+→ {"access_token": "...", "token_type": "bearer"}      # login ให้อัตโนมัติ
+```
+
+เปิดให้ใครก็สมัครได้ (ไม่ต้องมี token) แต่**ได้สิทธิ์ `user` เสมอ ไม่มีทางสมัครเป็น
+admin ได้เลย** (endpoint นี้ไม่รับฟิลด์ `role` แม้จะพยายามส่งมาก็ถูกเพิกเฉย) และ
+**ไม่มีอุปกรณ์ผูกไว้ให้เลยตอนสมัคร** ต้องรอ admin ไปผูกอุปกรณ์ให้ในแผง "จัดการ
+อุปกรณ์" ก่อน ถึงจะเห็นข้อมูลอะไรในแดชบอร์ด
 
 ### 6) Export ตาราง user เป็น .csv (admin เท่านั้น — มีปุ่มในหน้าเว็บแล้ว)
 
@@ -336,4 +359,3 @@ GET /iot/
 - ถ้าต้องการเปลี่ยนพอร์ต host ให้แก้แค่บรรทัด `API_PORT=` ใน `.env` แล้วสั่ง
   `docker compose up -d` ใหม่ (container ข้างในคงที่ที่ 8000 เสมอ ไม่ต้องแก้
   `docker-compose.yml`)
-# esp-monitor-api

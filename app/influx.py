@@ -68,3 +68,46 @@ def query_recent(
                 }
             )
     return results
+
+
+def query_latest(
+    device_id: Optional[str] = None,
+    device_ids: Optional[list] = None,
+):
+    """Just the single latest reading per matched device - device_id,
+    temperature, humidity only (no timestamp), for simple external
+    integrations that just want "what's the current value". Looks back up
+    to a year so a device that hasn't reported super recently still shows
+    its last known reading rather than nothing."""
+    if device_id:
+        device_filter = f'|> filter(fn: (r) => r.device_id == "{device_id}")'
+    elif device_ids:
+        if len(device_ids) == 0:
+            return []
+        conditions = " or ".join(f'r.device_id == "{d}"' for d in device_ids)
+        device_filter = f'|> filter(fn: (r) => {conditions})'
+    else:
+        device_filter = ""
+
+    flux = f'''
+    from(bucket: "{INFLUX_BUCKET}")
+      |> range(start: -365d)
+      |> filter(fn: (r) => r._measurement == "sensor_data")
+      {device_filter}
+      |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+      |> group(columns: ["device_id"])
+      |> sort(columns: ["_time"], desc: true)
+      |> limit(n: 1)
+    '''
+    tables = _query_api.query(flux)
+    results = []
+    for table in tables:
+        for record in table.records:
+            results.append(
+                {
+                    "device_id": record.values.get("device_id"),
+                    "temperature": record.values.get("temperature"),
+                    "humidity": record.values.get("humidity"),
+                }
+            )
+    return results

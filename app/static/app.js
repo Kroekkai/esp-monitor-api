@@ -123,6 +123,11 @@ function showLogin() {
   document.getElementById("loginSection").classList.remove("hidden");
   document.getElementById("dashboardSection").classList.add("hidden");
   document.getElementById("userBox").classList.add("hidden");
+  // Always land back on the login form specifically, not mid-registration.
+  document.getElementById("registerForm").classList.add("hidden");
+  document.getElementById("showLoginWrap").classList.add("hidden");
+  document.getElementById("loginForm").classList.remove("hidden");
+  document.getElementById("showRegisterWrap").classList.remove("hidden");
 }
 
 function showError(msg) {
@@ -482,6 +487,23 @@ async function login(username, password) {
   return decodeToken(data.access_token);
 }
 
+async function register(username, password) {
+  const res = await fetch(`${API_BASE}/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    // Pydantic validation errors (422) come back as {"detail": [...]} not a
+    // plain string - fall back to a generic message in that case.
+    const msg = typeof data.detail === "string" ? data.detail : "สมัครสมาชิกไม่สำเร็จ ลองตรวจสอบข้อมูลอีกครั้ง";
+    throw new Error(msg);
+  }
+  setToken(data.access_token);
+  return decodeToken(data.access_token);
+}
+
 // --- user management (admin) ---
 
 async function createUser(username, password, role) {
@@ -659,6 +681,39 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
   } catch (err) {
     errEl.textContent = err.message;
   }
+});
+
+document.getElementById("registerForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const username = document.getElementById("registerUsername").value;
+  const password = document.getElementById("registerPassword").value;
+  const errEl = document.getElementById("registerError");
+  errEl.textContent = "";
+  try {
+    const claims = await register(username, password);
+    clearError();
+    await showDashboard(claims);
+  } catch (err) {
+    errEl.textContent = err.message;
+  }
+});
+
+document.getElementById("showRegisterLink").addEventListener("click", (e) => {
+  e.preventDefault();
+  document.getElementById("loginForm").classList.add("hidden");
+  document.getElementById("showRegisterWrap").classList.add("hidden");
+  document.getElementById("registerForm").classList.remove("hidden");
+  document.getElementById("showLoginWrap").classList.remove("hidden");
+  document.getElementById("loginError").textContent = "";
+});
+
+document.getElementById("showLoginLink").addEventListener("click", (e) => {
+  e.preventDefault();
+  document.getElementById("registerForm").classList.add("hidden");
+  document.getElementById("showLoginWrap").classList.add("hidden");
+  document.getElementById("loginForm").classList.remove("hidden");
+  document.getElementById("showRegisterWrap").classList.remove("hidden");
+  document.getElementById("registerError").textContent = "";
 });
 
 document.getElementById("logoutBtn").addEventListener("click", () => {
