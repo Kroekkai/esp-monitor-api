@@ -24,6 +24,16 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=6, max_length=200)
 
 
+class ChangePasswordRequest(BaseModel):
+    """Any logged-in user changes their OWN password - must prove they
+    know the current one first. Works the same whether the account was
+    admin-created or self-registered; there's no difference once it
+    exists."""
+
+    current_password: str
+    new_password: str = Field(min_length=6, max_length=200)
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"

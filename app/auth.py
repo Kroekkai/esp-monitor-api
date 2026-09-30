@@ -1,7 +1,9 @@
 import os
 from datetime import datetime, timedelta
 
-from fastapi import Depends, HTTPException, status
+from typing import Optional
+
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -15,6 +17,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/iot/api/login")
+# Same as oauth2_scheme but doesn't raise on its own when the header is
+# missing (auto_error=False) - used only by get_principal below, so a
+# missing header can fall through to the ?token= query param instead
+# rather than failing immediately.
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/iot/api/login", auto_error=False)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
@@ -75,14 +82,39 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     return user
 
 
-async def get_principal(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+async def get_principal(
+    header_token: Optional[str] = Depends(oauth2_scheme_optional),
+    token: Optional[str] = Query(
+        None,
+        description="Same JWT as the Authorization header, as a query param instead - lets a plain browser URL work (e.g. pasting a link) without needing to set headers. Only accepted here, never for settings/admin endpoints.",
+    ),
+    db: Session = Depends(get_db),
+):
     """Like get_current_user, but also accepts a device-view token from an
-    alert link. Returns either a full User, or {"device_view": device_id}
-    for a scoped, read-only alert-link token. Only use this where
-    device-scoped read access is genuinely safe to grant (sensor data for
-    that one device) - never for settings or admin endpoints, which stay on
-    get_current_user / require_admin so a leaked alert link can't do more
-    than view that one device's graph."""
+    alert link, AND accepts the token via ?token= query param as well as
+    the Authorization header (get_current_user only accepts the header) -
+    so a sensor-data URL can be pasted straight into a browser address bar.
+    Returns either a full User, or {"device_view": device_id} for a
+    scoped, read-only alert-link token. Only use this where device-scoped
+    read access is genuinely safe to grant (sensor data for that one
+    device) - never for settings or admin endpoints, which stay on
+    get_current_user / require_admin so a leaked link (or a token sitting
+    in someone's browser history) can't do more than view data."""
+    actual_token = header_token or token
+    if not actual_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return resolve_jwt_principal(actual_token, db)
+
+
+def resolve_jwt_principal(token: str, db: Session):
+    """The actual JWT-decoding core of get_principal, split out so
+    get_principal_or_api_key (main.py) can reuse it after its own API-key
+    check fails to find a key, without re-declaring the header/query
+    parameter wiring twice."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",

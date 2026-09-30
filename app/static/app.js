@@ -3,6 +3,7 @@ const TOKEN_KEY = "iot_token";
 
 let tempChart, humidChart;
 let myDevices = []; // [{device_id, name}]
+let lastOrderedRows = []; // last fetched [{time, device_id, temperature, humidity}, ...] chronological - cached so toggling display options (gap-break checkbox) can re-render instantly without a refetch
 
 // --- auto-refresh (keeps the chart/table "live" without a manual reload) ---
 let autoRefreshTimer = null;
@@ -123,6 +124,7 @@ function showLogin() {
   document.getElementById("loginSection").classList.remove("hidden");
   document.getElementById("dashboardSection").classList.add("hidden");
   document.getElementById("userBox").classList.add("hidden");
+  document.getElementById("changePasswordSection").classList.add("hidden");
   // Always land back on the login form specifically, not mid-registration.
   document.getElementById("registerForm").classList.add("hidden");
   document.getElementById("showLoginWrap").classList.add("hidden");
@@ -141,7 +143,7 @@ function clearError() {
 }
 
 function selectedDeviceId() {
-  return document.getElementById("deviceSelect").value; // "" = all my devices
+  return document.getElementById("deviceSelect").value; // "" only when the user has zero devices assigned
 }
 
 // Landing for a Telegram alert-link view token: shows just that one
@@ -157,6 +159,9 @@ async function showGuestDashboard(deviceId) {
   document.getElementById("adminSection").classList.add("hidden");
   document.getElementById("deviceAdminSection").classList.add("hidden");
   document.getElementById("dataTableCard").classList.add("hidden");
+  // Not a real account (just a scoped Telegram-link token) - can't change a
+  // password that doesn't exist.
+  document.getElementById("changePasswordBtn").classList.add("hidden");
 
   const select = document.getElementById("deviceSelect");
   select.innerHTML = "";
@@ -190,6 +195,7 @@ async function showDashboard(claims) {
   document.getElementById("adminSection").classList.toggle("hidden", !isAdmin);
   document.getElementById("deviceAdminSection").classList.toggle("hidden", !isAdmin);
   document.getElementById("dataTableCard").classList.toggle("hidden", !isAdmin);
+  document.getElementById("changePasswordBtn").classList.remove("hidden");
 
   if (isAdmin) {
     try {
@@ -254,6 +260,8 @@ function initCharts() {
 
 // --- devices (mine) / selector ---
 
+let deviceSelectInitialized = false; // only auto-default to the user's own device on the FIRST population this session - later refreshes (e.g. after an admin edits a device) must respect whatever's currently selected
+
 async function loadMyDevices() {
   const res = await apiFetch("/devices/mine");
   if (!res.ok) return;
@@ -261,13 +269,12 @@ async function loadMyDevices() {
 
   const select = document.getElementById("deviceSelect");
   const previous = select.value;
+  const isFirstLoad = !deviceSelectInitialized;
   select.innerHTML = "";
 
-  const allOpt = document.createElement("option");
-  allOpt.value = "";
-  allOpt.textContent = "ทั้งหมด (ทุกอุปกรณ์ของฉัน)";
-  select.appendChild(allOpt);
-
+  // No "ทั้งหมด" (all devices) option anymore - a specific device must
+  // always be selected. Mixing multiple devices' readings onto one line
+  // chart didn't make much visual sense anyway.
   myDevices.forEach((d) => {
     const opt = document.createElement("option");
     opt.value = d.device_id;
@@ -277,17 +284,20 @@ async function loadMyDevices() {
 
   document.getElementById("noDeviceMsg").classList.toggle("hidden", myDevices.length > 0);
 
-  // deep-link from a Telegram alert wins over "keep previous selection"
+  // deep-link from a Telegram alert wins over everything else
   if (pendingDeviceId && [...select.options].some((o) => o.value === pendingDeviceId)) {
     select.value = pendingDeviceId;
     pendingDeviceId = null; // only force this once, not on every reload
+  } else if (isFirstLoad && myDevices.length > 0) {
+    // Opening the dashboard fresh: go straight to the user's own device
+    // (most people have exactly one) - no need to click the dropdown.
+    select.value = myDevices[0].device_id;
   } else if ([...select.options].some((o) => o.value === previous)) {
     select.value = previous;
   } else if (myDevices.length > 0) {
     select.value = myDevices[0].device_id;
-  } else {
-    select.value = "";
   }
+  deviceSelectInitialized = true;
 
   await onDeviceSelectionChanged();
 }
@@ -323,6 +333,22 @@ function withGapBreaks(points) {
     result.push(points[i]);
   }
   return result;
+}
+
+// Rebuilds just the main temperature/humidity line datasets from the last
+// fetched rows, honoring the "ไม่เชื่อมเส้นกราฟ" checkbox - instant, no
+// network call, safe to call directly from that checkbox's change handler.
+// Checked = break the line across gaps (withGapBreaks); unchecked = always
+// connect every point with a straight line regardless of how far apart in
+// time they are.
+function renderSensorLines() {
+  const breakGaps = document.getElementById("breakGapsCheckbox").checked;
+  const tempPoints = lastOrderedRows.map((r) => ({ x: new Date(r.time), y: r.temperature }));
+  const humidPoints = lastOrderedRows.map((r) => ({ x: new Date(r.time), y: r.humidity }));
+  tempChart.data.datasets[0].data = breakGaps ? withGapBreaks(tempPoints) : tempPoints;
+  humidChart.data.datasets[0].data = breakGaps ? withGapBreaks(humidPoints) : humidPoints;
+  tempChart.update();
+  humidChart.update();
 }
 
 const THRESHOLD_COLOR = "#ef4444"; // red - distinct from both data lines
@@ -454,11 +480,10 @@ async function loadData() {
     }
   });
 
-  tempChart.data.datasets[0].data = withGapBreaks(ordered.map((r) => ({ x: new Date(r.time), y: r.temperature })));
-  humidChart.data.datasets[0].data = withGapBreaks(ordered.map((r) => ({ x: new Date(r.time), y: r.humidity })));
+  lastOrderedRows = ordered;
+  renderSensorLines();
 
   await updateThresholdLines(deviceId, rangeStart, rangeEnd);
-
   tempChart.update();
   humidChart.update();
 
@@ -618,6 +643,22 @@ async function loadAlertSettings(deviceId) {
   document.getElementById("alertCooldown").value = s.cooldown_minutes ?? 15;
   document.getElementById("alertEnabled").checked = !!s.enabled;
   document.getElementById("alertMsg").textContent = "";
+  updateTelegramStatusDisplay(s.telegram_chat_id);
+  document.getElementById("telegramLinkResult").classList.add("hidden");
+  document.getElementById("telegramLinkError").textContent = "";
+}
+
+function updateTelegramStatusDisplay(chatId) {
+  const statusEl = document.getElementById("telegramStatus");
+  const disconnectBtn = document.getElementById("disconnectTelegramBtn");
+  const ids = (chatId || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (ids.length > 0) {
+    statusEl.textContent = ids.length === 1 ? "✅ เชื่อมต่อ Telegram แล้ว" : `✅ เชื่อมต่อ Telegram แล้ว (${ids.length} บัญชี)`;
+    disconnectBtn.classList.remove("hidden");
+  } else {
+    statusEl.textContent = "ยังไม่ได้เชื่อมต่อ Telegram";
+    disconnectBtn.classList.add("hidden");
+  }
 }
 
 function numOrNull(id) {
@@ -664,6 +705,38 @@ async function testAlert() {
   const res = await apiFetch(`/settings/alerts/${encodeURIComponent(deviceId)}/test`, { method: "POST" });
   const data = await res.json().catch(() => ({}));
   msgEl.textContent = res.ok ? "ส่งข้อความทดสอบแล้ว เช็ค Telegram ได้เลย" : (data.detail || "ส่งไม่สำเร็จ");
+}
+
+async function connectTelegram() {
+  const deviceId = selectedDeviceId();
+  if (!deviceId) return;
+  const errEl = document.getElementById("telegramLinkError");
+  const resultEl = document.getElementById("telegramLinkResult");
+  errEl.textContent = "";
+  resultEl.classList.add("hidden");
+
+  const res = await apiFetch(`/settings/alerts/${encodeURIComponent(deviceId)}/telegram/link-code`, { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    errEl.textContent = typeof data.detail === "string" ? data.detail : "สร้างลิงก์เชื่อมต่อไม่สำเร็จ";
+    return;
+  }
+  document.getElementById("telegramBotLink").href = data.bot_link;
+  document.getElementById("telegramLinkCode").textContent = data.code;
+  document.getElementById("telegramLinkExpiry").textContent = data.expires_in_minutes;
+  resultEl.classList.remove("hidden");
+}
+
+async function disconnectTelegram() {
+  const deviceId = selectedDeviceId();
+  if (!deviceId) return;
+  if (!confirm("ยกเลิกการเชื่อมต่อ Telegram ของอุปกรณ์นี้ใช่ไหม? (threshold ที่ตั้งไว้จะไม่หาย ต้องเชื่อมต่อใหม่ถ้าอยากรับแจ้งเตือนอีก)")) {
+    return;
+  }
+  const res = await apiFetch(`/settings/alerts/${encodeURIComponent(deviceId)}/telegram/disconnect`, { method: "POST" });
+  if (res.ok) {
+    await loadAlertSettings(deviceId);
+  }
 }
 
 // --- event bindings ---
@@ -718,7 +791,54 @@ document.getElementById("showLoginLink").addEventListener("click", (e) => {
 
 document.getElementById("logoutBtn").addEventListener("click", () => {
   clearToken();
+  deviceSelectInitialized = false;
   showLogin();
+});
+
+document.getElementById("changePasswordBtn").addEventListener("click", () => {
+  document.getElementById("changePasswordForm").reset();
+  document.getElementById("changePasswordMsg").textContent = "";
+  document.getElementById("changePasswordSection").classList.remove("hidden");
+});
+
+document.getElementById("cancelChangePasswordBtn").addEventListener("click", () => {
+  document.getElementById("changePasswordSection").classList.add("hidden");
+});
+
+document.getElementById("changePasswordForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const currentPassword = document.getElementById("currentPassword").value;
+  const newPassword = document.getElementById("newPassword").value;
+  const msgEl = document.getElementById("changePasswordMsg");
+  msgEl.textContent = "กำลังบันทึก...";
+  try {
+    // Deliberately a RAW fetch here, not apiFetch() - a wrong current
+    // password also comes back as 401 from the API, and apiFetch()
+    // treats any 401 as "session expired" and force-logs-out. That would
+    // be wrong here: we want to show "current password ผิด" inline and
+    // let them try again, not kick them out of the app.
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/users/me/password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      msgEl.textContent = typeof data.detail === "string" ? data.detail : "เปลี่ยนรหัสผ่านไม่สำเร็จ";
+      return;
+    }
+    msgEl.textContent = "เปลี่ยนรหัสผ่านสำเร็จแล้ว";
+    document.getElementById("changePasswordForm").reset();
+    setTimeout(() => {
+      document.getElementById("changePasswordSection").classList.add("hidden");
+    }, 1500);
+  } catch (err) {
+    msgEl.textContent = "เปลี่ยนรหัสผ่านไม่สำเร็จ (เชื่อมต่อไม่ได้)";
+  }
 });
 
 // Local YYYY-MM-DD for <input type="date"> - NOT toISOString().slice(0,10),
@@ -748,6 +868,7 @@ function toggleThresholdLines() {
 }
 document.getElementById("showThresholdLine").addEventListener("change", toggleThresholdLines);
 document.getElementById("showClearLine").addEventListener("change", toggleThresholdLines);
+document.getElementById("breakGapsCheckbox").addEventListener("change", renderSensorLines);
 
 document.getElementById("dateFilter").addEventListener("change", () => {
   const dateEl = document.getElementById("dateFilter");
@@ -819,6 +940,8 @@ document.getElementById("alertForm").addEventListener("submit", (e) => {
 });
 
 document.getElementById("testAlertBtn").addEventListener("click", testAlert);
+document.getElementById("connectTelegramBtn").addEventListener("click", connectTelegram);
+document.getElementById("disconnectTelegramBtn").addEventListener("click", disconnectTelegram);
 
 // --- boot ---
 // Wrap EVERYTHING so any unexpected error (e.g. Chart.js failing to load

@@ -95,6 +95,22 @@ class ShortLink(Base):
     expires_at = Column(DateTime, nullable=False)
 
 
+class TelegramLinkCode(Base):
+    """Short-lived one-time code generated when someone clicks "เชื่อมต่อ
+    Telegram" for a device. Handed to them as a t.me/<bot>?start=<code>
+    deep link; when Telegram delivers their /start <code> message to our
+    webhook, we look the code up here, grab the message's chat_id (no
+    manual entry needed), save it onto that device's AlertSettings, and
+    delete the code (one-time use)."""
+
+    __tablename__ = "telegram_link_codes"
+
+    code = Column(String, primary_key=True)
+    device_id = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _ensure_columns(
