@@ -4,6 +4,7 @@ const TOKEN_KEY = "iot_token";
 let tempChart, humidChart;
 let myDevices = []; // [{device_id, name}]
 let lastOrderedRows = []; // last fetched [{time, device_id, temperature, humidity}, ...] chronological - cached so toggling display options (gap-break checkbox) can re-render instantly without a refetch
+let currentUsername = null; // the logged-in user's own username, so the admin user table can hide/disable deleting your own active account
 
 // --- auto-refresh (keeps the chart/table "live" without a manual reload) ---
 let autoRefreshTimer = null;
@@ -125,11 +126,6 @@ function showLogin() {
   document.getElementById("dashboardSection").classList.add("hidden");
   document.getElementById("userBox").classList.add("hidden");
   document.getElementById("changePasswordSection").classList.add("hidden");
-  // Always land back on the login form specifically, not mid-registration.
-  document.getElementById("registerForm").classList.add("hidden");
-  document.getElementById("showLoginWrap").classList.add("hidden");
-  document.getElementById("loginForm").classList.remove("hidden");
-  document.getElementById("showRegisterWrap").classList.remove("hidden");
 }
 
 function showError(msg) {
@@ -191,6 +187,7 @@ async function showDashboard(claims) {
   document.getElementById("dashboardSection").classList.remove("hidden");
   document.getElementById("userBox").classList.remove("hidden");
   document.getElementById("whoami").textContent = `${claims.sub} (${claims.role})`;
+  currentUsername = claims.sub;
   const isAdmin = claims.role === "admin";
   document.getElementById("adminSection").classList.toggle("hidden", !isAdmin);
   document.getElementById("deviceAdminSection").classList.toggle("hidden", !isAdmin);
@@ -207,6 +204,11 @@ async function showDashboard(claims) {
       await loadDevicesAdmin();
     } catch (err) {
       console.error("loadDevicesAdmin failed:", err);
+    }
+    try {
+      await loadUsersAdmin();
+    } catch (err) {
+      console.error("loadUsersAdmin failed:", err);
     }
   }
   try {
@@ -512,23 +514,6 @@ async function login(username, password) {
   return decodeToken(data.access_token);
 }
 
-async function register(username, password) {
-  const res = await fetch(`${API_BASE}/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    // Pydantic validation errors (422) come back as {"detail": [...]} not a
-    // plain string - fall back to a generic message in that case.
-    const msg = typeof data.detail === "string" ? data.detail : "สมัครสมาชิกไม่สำเร็จ ลองตรวจสอบข้อมูลอีกครั้ง";
-    throw new Error(msg);
-  }
-  setToken(data.access_token);
-  return decodeToken(data.access_token);
-}
-
 // --- user management (admin) ---
 
 async function createUser(username, password, role) {
@@ -612,6 +597,45 @@ async function deleteDevice(deviceId) {
   if (res.ok) {
     await loadDevicesAdmin();
     await loadMyDevices();
+  }
+}
+
+async function loadUsersAdmin() {
+  const res = await apiFetch("/users");
+  if (!res.ok) return;
+  const users = await res.json();
+  const tbody = document.querySelector("#userTable tbody");
+  tbody.innerHTML = "";
+  users.forEach((u) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${u.username}</td><td>${u.role}</td><td></td>`;
+    if (u.username !== currentUsername) {
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "ลบ";
+      delBtn.addEventListener("click", () => deleteUser(u.username));
+      tr.lastElementChild.appendChild(delBtn);
+    } else {
+      // Can't delete your own active account - say so instead of just
+      // leaving the cell blank, so it's clear this is intentional.
+      tr.lastElementChild.textContent = "(บัญชีที่ใช้อยู่)";
+      tr.lastElementChild.className = "muted";
+    }
+    tbody.appendChild(tr);
+  });
+}
+
+async function deleteUser(username) {
+  if (!confirm(`ลบ user "${username}" ใช่ไหม? (อุปกรณ์ที่เคยผูกกับ user นี้จะกลายเป็น "ไม่ผูกกับ user" แทน ไม่ได้ถูกลบไปด้วย)`)) {
+    return;
+  }
+  const res = await apiFetch(`/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    await loadUsersAdmin();
+    await loadUsersForDropdown();
+    await loadDevicesAdmin();
+  } else {
+    alert(data.detail || "ลบ user ไม่สำเร็จ");
   }
 }
 
@@ -756,39 +780,6 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
   }
 });
 
-document.getElementById("registerForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const username = document.getElementById("registerUsername").value;
-  const password = document.getElementById("registerPassword").value;
-  const errEl = document.getElementById("registerError");
-  errEl.textContent = "";
-  try {
-    const claims = await register(username, password);
-    clearError();
-    await showDashboard(claims);
-  } catch (err) {
-    errEl.textContent = err.message;
-  }
-});
-
-document.getElementById("showRegisterLink").addEventListener("click", (e) => {
-  e.preventDefault();
-  document.getElementById("loginForm").classList.add("hidden");
-  document.getElementById("showRegisterWrap").classList.add("hidden");
-  document.getElementById("registerForm").classList.remove("hidden");
-  document.getElementById("showLoginWrap").classList.remove("hidden");
-  document.getElementById("loginError").textContent = "";
-});
-
-document.getElementById("showLoginLink").addEventListener("click", (e) => {
-  e.preventDefault();
-  document.getElementById("registerForm").classList.add("hidden");
-  document.getElementById("showLoginWrap").classList.add("hidden");
-  document.getElementById("loginForm").classList.remove("hidden");
-  document.getElementById("showRegisterWrap").classList.remove("hidden");
-  document.getElementById("registerError").textContent = "";
-});
-
 document.getElementById("logoutBtn").addEventListener("click", () => {
   clearToken();
   deviceSelectInitialized = false;
@@ -902,7 +893,7 @@ document.getElementById("clearDateBtn").addEventListener("click", () => {
 document.getElementById("createUserForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const username = document.getElementById("newUsername").value;
-  const password = document.getElementById("newPassword").value;
+  const password = document.getElementById("newUserPassword").value;
   const role = document.getElementById("newRole").value;
   const msgEl = document.getElementById("userMsg");
   try {
@@ -910,6 +901,7 @@ document.getElementById("createUserForm").addEventListener("submit", async (e) =
     msgEl.textContent = `สร้าง user "${username}" สำเร็จ`;
     document.getElementById("createUserForm").reset();
     await loadUsersForDropdown();
+    await loadUsersAdmin();
   } catch (err) {
     msgEl.textContent = err.message;
   }

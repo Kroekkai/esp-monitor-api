@@ -14,16 +14,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class RegisterRequest(BaseModel):
-    """Self-service signup - intentionally has NO role field at all (unlike
-    UserCreate, which admins use and which does accept a role). A
-    self-registered account is always plain "user" - never admin, no way
-    for the request body to say otherwise."""
-
-    username: str = Field(min_length=3, max_length=100)
-    password: str = Field(min_length=6, max_length=200)
-
-
 class ChangePasswordRequest(BaseModel):
     """Any logged-in user changes their OWN password - must prove they
     know the current one first. Works the same whether the account was

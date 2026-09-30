@@ -32,7 +32,6 @@ from .schemas import (
     ChangePasswordRequest,
     DeviceIn,
     LoginRequest,
-    RegisterRequest,
     SensorData,
     Token,
     UserCreate,
@@ -197,29 +196,6 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = authenticate_user(db, payload.username, payload.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    token = create_access_token({"sub": user.username, "role": user.role})
-    return Token(access_token=token)
-
-
-@iot.post("/api/register", response_model=Token)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)):
-    """Self-service signup - open to anyone, no login required to call this.
-    Always creates a plain "user" account (RegisterRequest has no role
-    field at all - see schemas.py) with zero devices assigned; an admin
-    still has to assign a device before the new account sees any data.
-    Logs the new user straight in (same as a successful /api/login) so
-    they land on the dashboard immediately instead of registering then
-    having to log in separately."""
-    if db.query(User).filter(User.username == payload.username).first():
-        raise HTTPException(status_code=400, detail="Username already exists")
-    user = User(
-        username=payload.username,
-        hashed_password=hash_password(payload.password),
-        role="user",
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
     token = create_access_token({"sub": user.username, "role": user.role})
     return Token(access_token=token)
 
@@ -417,6 +393,30 @@ def create_user(
 @iot.get("/api/users")
 def list_users(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     return [{"username": u.username, "role": u.role} for u in db.query(User).all()]
+
+
+@iot.delete("/api/users/{username}")
+def delete_user(
+    username: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Admin can delete any user EXCEPT the account they're currently
+    logged in as - deleting your own active session's account would lock
+    you out immediately with no way back in without server access."""
+    if username == admin.username:
+        raise HTTPException(status_code=400, detail="ลบบัญชีของตัวเองที่ใช้งานอยู่ไม่ได้")
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="ไม่พบ user นี้")
+
+    # Unassign (not delete) any devices this user owned, so they show back
+    # up as "ไม่ผูกกับ user" instead of pointing at a user that no longer
+    # exists.
+    db.query(Device).filter(Device.owner_user_id == user.id).update({"owner_user_id": None})
+    db.delete(user)
+    db.commit()
+    return {"status": "deleted", "username": username}
 
 
 @iot.get("/api/users/export")

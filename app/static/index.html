@@ -6,7 +6,7 @@
 <title>ESP Temperature/Humidity Monitor</title>
 <script src="/iot/static/vendor/chart.umd.js"></script>
 <script src="/iot/static/vendor/chartjs-adapter-date-fns.bundle.min.js"></script>
-<link rel="stylesheet" href="/iot/static/style.css?v=36" />
+<link rel="stylesheet" href="/iot/static/style.css?v=37" />
 </head>
 <body>
 
@@ -49,21 +49,6 @@
       <button type="submit">Login</button>
       <p id="loginError" class="error"></p>
     </form>
-    <p class="muted auth-switch" id="showRegisterWrap">
-      ยังไม่มีบัญชี? <a href="#" id="showRegisterLink">สมัครสมาชิก</a>
-    </p>
-
-    <form id="registerForm" class="hidden">
-      <h2>สมัครสมาชิก</h2>
-      <label>Username <input type="text" id="registerUsername" required minlength="3" autocomplete="username" /></label>
-      <label>Password (อย่างน้อย 6 ตัวอักษร) <input type="password" id="registerPassword" required minlength="6" autocomplete="new-password" /></label>
-      <button type="submit">สมัครสมาชิก</button>
-      <p id="registerError" class="error"></p>
-      <p class="muted">สมัครแล้วจะยังไม่เห็นข้อมูลอุปกรณ์ใดๆ จนกว่า admin จะผูกอุปกรณ์ให้</p>
-    </form>
-    <p class="muted auth-switch hidden" id="showLoginWrap">
-      มีบัญชีอยู่แล้ว? <a href="#" id="showLoginLink">เข้าสู่ระบบ</a>
-    </p>
   </section>
 
   <!-- DASHBOARD -->
@@ -73,7 +58,7 @@
       <label>อุปกรณ์
         <select id="deviceSelect"></select>
       </label>
-      <label>เลือกวันที่
+      <label>หรือเลือกวันที่
         <input type="date" id="dateFilter" />
       </label>
       <button type="button" id="clearDateBtn" class="secondary hidden">ล้างวันที่</button>
@@ -135,7 +120,7 @@
     <!-- ALERT SETTINGS - visible to everyone, but scoped to the currently
          selected device (their own device for a regular user) -->
     <div class="card">
-      <h2>ตั้งค่าแจ้งเตือน Telegram</h2>
+      <h2>ตั้งค่าแจ้งเตือน Telegram (อุปกรณ์ที่เลือกด้านบน)</h2>
       <p id="alertPickDeviceMsg" class="muted hidden">เลือกอุปกรณ์เฉพาะเครื่องด้านบนก่อน เพื่อตั้งค่าแจ้งเตือน</p>
       <form id="alertForm" class="alert-form hidden">
         <div id="telegramLinkArea">
@@ -147,7 +132,7 @@
           <div id="telegramLinkResult" class="hidden">
             <p>เปิด Telegram แล้วกดส่งข้อความที่เตรียมไว้ให้ เพื่อเชื่อมต่อ:</p>
             <a id="telegramBotLink" href="#" target="_blank" rel="noopener"><button type="button">เปิด Telegram เพื่อเชื่อมต่อ</button></a>
-            <p class="muted">พิมในChatbot: /start <span id="telegramLinkCode"></span> เพื่อเริ่มทำงาน (หมดอายุใน <span id="telegramLinkExpiry"></span> นาที) </p>
+            <p class="muted">รหัส:/start <span id="telegramLinkCode"></span> (หมดอายุใน <span id="telegramLinkExpiry"></span> นาที)</p>
           </div>
           <p id="telegramLinkError" class="error"></p>
         </div>
@@ -162,7 +147,7 @@
 
         <div class="threshold-row">
           <label>อุณหภูมิสูงกว่า (°C)
-            <input type="number" step="0.1" id="alertTempHigh" placeholder="ค่าการเกิดการแจ้งเตือน" />
+            <input type="number" step="0.1" id="alertTempHigh" placeholder="ค่าเกิดการแจ้งเตือน" />
           </label>
           <label>อุณหภูมิกลับปกติเมื่อต่ำกว่า (°C)
             <input type="number" step="0.1" id="alertTempHighClear" placeholder="ค่ากลับมาปกติ" />
@@ -171,7 +156,7 @@
 
         <div class="threshold-row">
           <label>ความชื้นสูงกว่า (%)
-            <input type="number" step="0.1" id="alertHumidHigh" placeholder="ค่าการเกิดการแจ้งเตือน" />
+            <input type="number" step="0.1" id="alertHumidHigh" placeholder="ค่าเกิดการแจ้งเตือน" />
           </label>
           <label>ความชื้นกลับปกติเมื่อต่ำกว่า (%)
             <input type="number" step="0.1" id="alertHumidHighClear" placeholder="ค่ากลับมาปกติ" />
@@ -202,7 +187,7 @@
       <h2>จัดการอุปกรณ์ (admin)</h2>
       <form id="deviceForm" class="inline-form">
         <input type="text" id="devDeviceId" placeholder="device_id เช่น esp32-01" required />
-        <input type="text" id="devName" placeholder="ชื่อเล่น (ไม่บังคับ)" />
+        <input type="text" id="devName" placeholder="ชื่อสถานที่ (ไม่บังคับ)" />
         <select id="devOwner">
           <option value="">— ไม่ผูกกับ user —</option>
         </select>
@@ -224,7 +209,7 @@
       <h2>จัดการผู้ใช้ (admin)</h2>
       <form id="createUserForm" class="inline-form">
         <input type="text" id="newUsername" placeholder="username" required />
-        <input type="password" id="newPassword" placeholder="password" required />
+        <input type="password" id="newUserPassword" placeholder="password" required />
         <select id="newRole">
           <option value="user">user</option>
           <option value="admin">admin</option>
@@ -233,12 +218,20 @@
       </form>
       <p id="userMsg" class="muted"></p>
       <button id="exportCsvBtn">ดาวน์โหลด users.csv</button>
+      <div class="table-wrap">
+        <table id="userTable">
+          <thead>
+            <tr><th>username</th><th>role</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
 
   </section>
 
 </main>
 
-<script src="/iot/static/app.js?v=36"></script>
+<script src="/iot/static/app.js?v=37"></script>
 </body>
 </html>
