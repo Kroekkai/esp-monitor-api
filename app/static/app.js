@@ -48,36 +48,26 @@ const urlParams = new URLSearchParams(window.location.search);
 let pendingDeviceId = urlParams.get("device");
 const urlViewToken = urlParams.get("token");
 
-// In-memory fallback for the token, used when localStorage is blocked or
-// restricted (some in-app browsers, e.g. Telegram's built-in browser, do
-// this). Without this fallback, tapping an alert link inside Telegram's
-// own browser would silently lose the token right after page load and
-// bounce back to the login screen.
+// The normal login lives in an HttpOnly session cookie set by the server
+// (sent automatically with every request, not readable here). This
+// variable only holds the short-lived alert-link token from ?token=, so it
+// is in memory only and gone when the tab closes.
 let inMemoryToken = null;
 
 function getToken() {
-  try {
-    return localStorage.getItem(TOKEN_KEY) || inMemoryToken;
-  } catch {
-    return inMemoryToken;
-  }
+  return inMemoryToken;
 }
 
 function setToken(token) {
   inMemoryToken = token;
-  try {
-    localStorage.setItem(TOKEN_KEY, token);
-  } catch (err) {
-    console.warn("localStorage unavailable, continuing with in-memory token only:", err);
-  }
 }
 
 function clearToken() {
   inMemoryToken = null;
   try {
-    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY); // leftover from older versions that stored the login token here
   } catch {
-    // ignore - nothing to clear if storage was never writable
+    // storage blocked - nothing to clear
   }
 }
 
@@ -510,8 +500,7 @@ async function login(username, password) {
   });
   if (!res.ok) throw new Error("Invalid username or password");
   const data = await res.json();
-  setToken(data.access_token);
-  return decodeToken(data.access_token);
+  return decodeToken(data.access_token); // session itself is the HttpOnly cookie the server just set
 }
 
 // --- user management (admin) ---
@@ -780,7 +769,12 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
   }
 });
 
-document.getElementById("logoutBtn").addEventListener("click", () => {
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+  try {
+    await fetch(`${API_BASE}/logout`, { method: "POST" });
+  } catch {
+    // offline - still show the login screen
+  }
   clearToken();
   deviceSelectInitialized = false;
   showLogin();
@@ -950,13 +944,21 @@ try {
   );
 }
 
+(async () => {
 try {
-  const existingToken = getToken();
-  const existingClaims = existingToken ? decodeToken(existingToken) : null;
-  const hasValidSession =
-    existingClaims && existingClaims.exp * 1000 > Date.now() && existingClaims.scope !== "device_view";
+  clearToken(); // also drops any token an older version left in localStorage
 
-  if (hasValidSession) {
+  // Ask the server whether this browser's session cookie is still valid.
+  // Raw fetch on purpose: a 401 here just means "not logged in".
+  let existingClaims = null;
+  try {
+    const meRes = await fetch(`${API_BASE}/me`);
+    if (meRes.ok) existingClaims = await meRes.json();
+  } catch {
+    // server unreachable - fall through to the login screen
+  }
+
+  if (existingClaims) {
     // Already logged in on this browser - a real session always wins over a
     // scoped alert-link token, since it gives full access to everything the
     // guest token can (and more).
@@ -993,3 +995,4 @@ try {
   showError(`เกิดข้อผิดพลาดตอนโหลดหน้าเว็บ: ${err.message}`);
   showLogin();
 }
+})();

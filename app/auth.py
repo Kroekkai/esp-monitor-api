@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Query, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -13,7 +13,15 @@ from .database import get_db, User
 
 SECRET_KEY = os.getenv("JWT_SECRET", "change-me-please")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))
+# Login lasts 7 days by default. The browser session cookie is renewed
+# automatically while the site is being used (see main.py), so in practice
+# you only get logged out after ~7 days of NOT using it.
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", str(7 * 24 * 60)))
+
+# HttpOnly cookie that holds the login JWT for the web dashboard, so the
+# login survives closing the tab/browser without keeping the token where
+# page JavaScript can read it.
+SESSION_COOKIE_NAME = "iot_session"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/iot/api/login")
@@ -62,12 +70,21 @@ def authenticate_user(db: Session, username: str, password: str):
     return user
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+async def get_current_user(
+    request: Request,
+    header_token: Optional[str] = Depends(oauth2_scheme_optional),
+    db: Session = Depends(get_db),
+) -> User:
+    """Logged-in user from the Authorization header, or failing that the
+    browser's session cookie (set at login)."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    token = header_token or request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        raise credentials_exception
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
@@ -83,6 +100,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 
 
 async def get_principal(
+    request: Request,
     header_token: Optional[str] = Depends(oauth2_scheme_optional),
     token: Optional[str] = Query(
         None,
@@ -100,7 +118,7 @@ async def get_principal(
     device) - never for settings or admin endpoints, which stay on
     get_current_user / require_admin so a leaked link (or a token sitting
     in someone's browser history) can't do more than view data."""
-    actual_token = header_token or token
+    actual_token = header_token or token or request.cookies.get(SESSION_COOKIE_NAME)
     if not actual_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

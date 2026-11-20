@@ -6,14 +6,19 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from .alerts import check_and_alert, device_link, get_settings, send_telegram_message, update_settings
 from .telegram_bot import WEBHOOK_SECRET, create_link_code, handle_incoming_update, register_webhook
 from .auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    ALGORITHM as JWT_ALGORITHM,
+    SECRET_KEY as JWT_SECRET_KEY,
+    SESSION_COOKIE_NAME,
     authenticate_user,
     create_access_token,
     get_current_user,
@@ -56,6 +61,7 @@ iot = APIRouter(prefix="/iot")
 
 
 async def get_principal_or_api_key(
+    request: Request,
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
     header_token: Optional[str] = Depends(oauth2_scheme_optional),
     token: Optional[str] = None,
@@ -75,10 +81,52 @@ async def get_principal_or_api_key(
             raise HTTPException(status_code=401, detail="Invalid device API key")
         return "device_api_key"
 
-    actual_token = header_token or token
+    actual_token = header_token or token or request.cookies.get(SESSION_COOKIE_NAME)
     if not actual_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token", headers={"WWW-Authenticate": "Bearer"})
     return resolve_jwt_principal(actual_token, db)
+
+
+SESSION_COOKIE_MAX_AGE = ACCESS_TOKEN_EXPIRE_MINUTES * 60
+# Re-issue the session cookie once it has been in use for more than a day,
+# so an active user never hits the 7-day expiry; only ~7 days of not
+# opening the site logs them out.
+SESSION_RENEW_AFTER_SECONDS = 24 * 60 * 60
+
+
+def _set_session_cookie(response: Response, request: Request, token: str) -> None:
+    is_https = (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+    )
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=SESSION_COOKIE_MAX_AGE,
+        httponly=True,  # page JavaScript can't read it
+        samesite="lax",  # not sent on cross-site POSTs
+        secure=is_https,  # https-only when served over https; still works on plain-http LAN
+        path="/iot",
+    )
+
+
+@app.middleware("http")
+async def renew_session_cookie(request: Request, call_next):
+    response = await call_next(request)
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token or response.status_code == 401 or "set-cookie" in response.headers:
+        return response
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    except JWTError:
+        return response
+    if payload.get("scope") == "device_view" or not payload.get("sub"):
+        return response
+    remaining = payload.get("exp", 0) - datetime.utcnow().timestamp()
+    if remaining < SESSION_COOKIE_MAX_AGE - SESSION_RENEW_AFTER_SECONDS:
+        new_token = create_access_token({"sub": payload["sub"], "role": payload.get("role")})
+        _set_session_cookie(response, request, new_token)
+    return response
 
 
 @app.on_event("startup")
@@ -192,12 +240,28 @@ def post_sensor_data(
 
 
 @iot.post("/api/login", response_model=Token)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+def login(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     user = authenticate_user(db, payload.username, payload.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     token = create_access_token({"sub": user.username, "role": user.role})
+    # The browser keeps the login in an HttpOnly cookie. The token is still
+    # returned in the body for scripts/devices that send it as a header.
+    _set_session_cookie(response, request, token)
     return Token(access_token=token)
+
+
+@iot.get("/api/me")
+def who_am_i(user: User = Depends(get_current_user)):
+    """Lets the dashboard check on page load whether the browser still has a
+    valid login session (the cookie itself is not readable from JS)."""
+    return {"sub": user.username, "role": user.role}
+
+
+@iot.post("/api/logout")
+def logout(response: Response):
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/iot")
+    return {"status": "logged_out"}
 
 
 @iot.post("/api/users/me/password")
